@@ -1,0 +1,666 @@
+---
+title: |
+  | **TRANSCRIPTOMIC SIGNATURES OF EPSTEIN-BARR VIRUS LYTIC REACTIVATION**
+  | A DESeq2 Interaction-Model Reanalysis of GEO Dataset GSE135794
+subtitle: "R and Bioconductor | Final Project Report"
+author: |
+  | **Group 3**
+  | Ogenrwot Jerome Bright | Hawa Hassan Mzee | Racheal Claire Kyomukama
+  | Haumba Jonathan | Ategeka Sharon | Patricia Mystica Apio | Abraham Byomugabe
+date: "`r format(Sys.Date(), '%B %d, %Y')`"
+output:
+  pdf_document:
+    toc: true
+    toc_depth: 3
+    number_sections: true
+    fig_caption: true
+    fig_width: 8
+    fig_height: 5
+    keep_tex: false
+    latex_engine: xelatex
+    highlight: tango
+header-includes:
+  - \usepackage{booktabs}
+  - \usepackage{longtable}
+  - \usepackage{float}
+  - \usepackage{array}
+  - \usepackage{xcolor}
+  - \usepackage{fancyhdr}
+  - \usepackage{graphicx}
+  - \usepackage{setspace}
+  - \usepackage{geometry}
+  - \geometry{margin=2.5cm}
+  - \pagestyle{fancy}
+  - \fancyhf{}
+  - \fancyhead[L]{\small EBV Reactivation Transcriptomics | Group 3}
+  - \fancyhead[R]{\small R and Bioconductor}
+  - \fancyfoot[C]{\thepage}
+  - \renewcommand{\headrulewidth}{0.4pt}
+  - \onehalfspacing
+  - \definecolor{codeblue}{HTML}{1B4F72}
+  - \definecolor{navy}{HTML}{0D1B2A}
+  - \usepackage{mdframed}
+  - \newmdenv[backgroundcolor=gray!10, linecolor=gray!40, linewidth=0.5pt, innerleftmargin=8pt, innerrightmargin=8pt, innertopmargin=6pt, innerbottommargin=6pt]{codebox}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo      = TRUE,
+  warning   = FALSE,
+  message   = FALSE,
+  fig.align = "center",
+  fig.pos   = "H",
+  cache     = FALSE,
+  tidy      = FALSE
+)
+```
+
+\newpage
+
+# Abstract
+
+Epstein-Barr virus (EBV) is an oncogenic gamma-herpesvirus causally associated with Burkitt lymphoma and other B-cell malignancies, with the switch from viral latency to lytic replication being a key event its pathogenesis. The host transcriptional mechanisms governing this switch, however remain poorly understood. This study reanalysed a publicly available RNA-sequencing dataset GSE135794, derived from EBV-positive HH514-16 Burkitt lymphoma cells treated with the lytic inducer sodium butyrate (NaB) and the anticonvulsant Histone Deacetylse (HDAC) inhibitors valproate (VPA) and valpromide (VPM). A NaB × Inhibitor interaction model implemented in DESeq2 was used to specifically identify host genes whose transcriptional response to NaB is reversed by each inhibitor. The VPA contrast yielded 1,309 significant genes (|log2FC| > 1, padj < 0.05) and the VPM contrast yielded 90, reflecting VPA's greater HDAC inhibitory potency. A stringent concordant overlap analysis identified 127 genes significantly and directionally consistently reversed by both inhibitors, defining a high-confidence core reactivation-control signature. Pathway enrichment using ReactomePA identified the RHO GTPase cycle as the sole statistically significant Reactome pathway (padj = 0.016, 12 genes), implicating cytoskeletal remodelling and vesicular trafficking in EBV lytic progression. Gene Ontology enrichment identified borderline significant enrichment of miRNA metabolic process regulation (padj = 0.076, 5 genes: NFKB1, EGR1, NEAT1, FOS, SREBF1), suggesting a post-transcriptional layer of latency control. Together, these findings define a mechanistic framework in which HDAC inhibitors suppress EBV lytic reactivation through restoration of NF-κB and B-cell identity programmes, disruption of RHO GTPase-dependent cytoskeletal remodelling, lipid metabolic reversal, and suppression of the immediate-early lytic transactivator EGR1.
+
+\newpage
+
+# Introduction
+
+## Background and Biological Rationale
+
+Epstein-Barr virus (EBV), formally designated human herpesvirus 4, is a lymphotropic gamma-herpesvirus that establishes lifelong latency in memory B lymphocytes following primary infection (Brady,MacArthur & Farrell, 2007). With a global seroprevalence exceeding 90% in adults, EBV ranks among the most successful human pathogens (Kenney & Mertz, 2014). Its oncogenic potential is well established: EBV is causally associated with Burkitt lymphoma (BL), the most common childhood malignancy in equatorial Africa, as well as nasopharyngeal carcinoma, Hodgkin lymphoma, and post-transplant lymphoproliferative disorders (Lieberman, 2013). The World Health Organisation classifies EBV as a Group 1 carcinogen, and its role in global cancer burden is increasingly recognised, particularly in low- and middle-income countries where access to early diagnosis and treatment remains limited (Wong et al., 2022)
+
+A defining and therapeutically exploitable feature of EBV biology is the **latency-to-lytic switch**. During latency, the viral genome persists as a circular episome in the nucleus of infected B cells, with tightly restricted gene expression confined to latency-associated genes (LMPs, EBNAs) and non-coding RNAs that suppress host immune responses and promote B-cell survival and proliferation (Woellmer & Hammerschmidt, 2013). Lytic reactivation, by contrast, entails the sequential expression of three kinetic classes of viral genes, i.e., immediate-early (BZLF1, BRLF1), early (encoding viral polymerases and nucleotide metabolism enzymes), and late (encoding structural virion proteins) together culminating in the assembly and egress of infectious virions that can infect new cells or spread systemically (Kenney & Mertz, 2014). The lytic cycle contributes to oncogenesis by producing virions capable of infecting new B cells, by secreting paracrine oncogenic factors, and through the expression of viral oncoproteins during the lytic-to-latency transition in newly infected cells (Damania, Kenney & Raab-Traub, 2022).
+
+Understanding what host factors control the latency-to-lytic switch at the transcriptional level is therefore of direct biological and therapeutic importance. If the host gene expression changes required to permit lytic reactivation can be identified, pharmacological strategies that maintain these genes in their latency-permissive state could represent novel antiviral approaches.
+
+## The Experimental Model: NaB, VPA, and VPM
+
+Sodium butyrate (NaB) is a short-chain fatty acid produced by intestinal bacteria that functions as a histone deacetylase (HDAC) inhibitor as reported by  Wang et. al. (2026). By preventing HDAC-mediated removal of acetyl groups from histone lysine residues, NaB promotes a globally open chromatin configuration that facilitates transcriptional activation of both host and viral lytic genes. NaB-induced EBV lytic reactivation in latently infected B cells is mediated at least partly through activation of the viral immediate-early transactivator BZLF1, which commits the virus irreversibly to the lytic programme (Kenney & Mertz, 2014). NaB is therefore widely used experimentally as a lytic inducer.
+
+On the other hand, valproate (VPA; 2-propylpentanoic acid) and valpromide (VPM; 2-propylpentanamide), which are structurally related short-chain fatty acids used clinically as anticonvulsants and mood stabilisers, are also HDAC inhibitors that suppress rather than induce EBV lytic reactivation as demonstarated in the study dataset from  Gorres, Reineke  & Miller (2024). This paradox provides the basis of our experimental framework: by comparing cells in which NaB-induced reactivation proceeds (NaB alone) versus cells in which it is blocked by VPA or VPM (NaB + VPA, NaB + VPM), one can identify the specific host transcriptional changes that are necessary for lytic reactivation and that are dismantled by the inhibitors. The specific molecular mechanism by which VPA and VPM selectively maintain latency, despite their structural and functional similarity to NaB, was not fully resolved by prior analyses by  Gorres, Reineke  & Miller (2024) and therefore formed the central scientific question of this study.
+
+## Study aims
+1. To identify host genes whose transcriptional response to NaB is specifically reversed by VPA or VPM.
+2. To define a reactivation-control gene signature intersecting genes concordantly and directionally reversed by both inhibitors.
+3. To characterise the biological functions and pathways represented in the core signature through Reactome and Gene Ontology enrichment analysis.
+
+## Dataset Description
+
+The dataset GSE135794 was deposited by  Gorres, Reineke  & Miller (2024) and accessed from the NCBI Gene Expression Omnibus (GEO). It contains bulk RNA-sequencing data from HH514-16 cells, an EBV-positive Burkitt lymphoma cell line treated for 6 hours under six conditions with two biological replicates per condition (12 samples total): DMSO vehicle control (untreated), sodium butyrate alone (NaB), valproate alone (VPA), NaB + VPA, valpromide alone (VPM), and NaB + VPM. Reads were aligned to the human reference genome GRCh38.p13. Gene-level raw count data and accompanying annotation files were used as primary inputs.
+
+\newpage
+
+# Methods
+
+## Computational Environment
+
+All analyses were conducted in R version 4.5.3 using the Bioconductor suite of packages (Huber et al., 2015). The primary packages employed were: `DESeq2` (version 1.44) for differential expression modelling, `clusterProfiler` (version 4.12) and `ReactomePA` for pathway enrichment, `ggplot2` and `ggrepel` for visualisation, and `pheatmap` for hierarchical clustering heatmaps. 
+
+## Step 0: Library Loading
+
+```{r libraries}
+# Suppress startup messages for cleaner output
+suppressPackageStartupMessages({
+  library(DESeq2)          # For differential expression via negative binomial GLM
+  library(dplyr)           # For data manipulation
+  library(readr)           # For fast reading of tabular files
+  library(ggplot2)         # For visualisation
+  library(ggrepel)         # To generate Non-overlapping gene labels on plots
+  library(pheatmap)        # To create Hierarchical clustering heatmaps
+  library(clusterProfiler) # GO and pathway enrichment
+  library(org.Hs.eg.db)    #For human gene annotation database
+  library(ReactomePA)      # Reactome pathway enrichment
+  library(tibble)          # Modern data frame utilities
+})
+```
+
+Each library addresses a distinct analytical need. `DESeq2` implements a negative binomial generalised linear model specifically designed for RNA-seq integer count data, which, unlike microarray or proteomics data, follows an overdispersed Poisson distribution that cannot be appropriately modelled by linear regression alone (Love  Huber & Anders, 2014). `ggrepel` was added specifically to produce readable volcano plots with non-overlapping gene labels, an improvement over base R text placement for dense datasets with many of points. `ReactomePA` accesses the Reactome pathway database, which provides manually curated, hierarchically organised biochemical pathway annotations with superior mechanistic resolution compared to the broader Gene Ontology (Yu & He, 2016).
+
+## Step 1: Data Loading
+
+```{r load_data, echo=TRUE}
+# Setting working directory
+setwd("/home/jerrybryt/MSBT/Yr1 Sem2/R/Course Assignment 1/Fin_report")
+
+# Loading raw count matrix from GEO supplementary file
+counts <- read_tsv("GSE135794_raw_counts_GRCh38.p13_NCBI.tsv.gz",
+                   show_col_types = FALSE)
+
+# Extracting NCBI Entrez Gene IDs from first column before removing it
+gene_ids <- counts[[1]]
+counts   <- counts[, -1]
+
+# Rounding to integer mode (DESeq2 requires non-negative integer counts)
+# Alignment tools (e.g. STAR) can produce fractional multi-mapped counts.
+counts   <- round(as.matrix(counts))
+rownames(counts) <- gene_ids
+
+# Load gene annotation: maps Entrez IDs to gene symbols and descriptions
+annot <- read_tsv("Human.GRCh38.p13.annot.tsv.gz", show_col_types = FALSE)
+```
+
+The raw count matrix contains integer counts of RNA fragments mapping to each annotated gene per sample, as produced by the STAR aligner and featureCounts quantification pipeline used by the original depositors. DESeq2 requires strictly non-negative integer values because its statistical model, i.e., the negative binomial distribution is made parametric in terms of discrete count events. Fractional values, which can arise from multi-mapping read correction in some quantification tools, must be rounded prior to modelling (Love,  Huber & Anders, 2014). The gene annotation file provides essential metadata linking each NCBI Entrez Gene ID (used as row identifiers in the count matrix) to human-readable gene symbols and functional descriptions, which are required for biological interpretation of results.
+
+## Step 2: Metadata Construction
+
+```{r metadata}
+meta <- data.frame(
+  sample    = colnames(counts),
+  title     = c("Untreated rep1", "Untreated rep2",
+                 "NaB rep1",      "NaB rep2",
+                 "VPA rep1",      "VPA rep2",
+                 "NaB_VPA rep1",  "NaB_VPA rep2",
+                 "VPM rep1",      "VPM rep2",
+                 "NaB_VPM rep1",  "NaB_VPM rep2"),
+  NaB       = factor(c("no","no","yes","yes","no","no","yes","yes",
+                        "no","no","yes","yes"), levels = c("no","yes")),
+  Inhibitor = factor(c("none","none","none","none",
+                        "VPA","VPA","VPA","VPA",
+                        "VPM","VPM","VPM","VPM"),
+                      levels = c("none","VPA","VPM")),
+  replicate = factor(rep(1:2, 6)),
+  row.names = "sample",
+  stringsAsFactors = FALSE
+)
+```
+
+The metadata data frame encodes the experimental design as a structured R object compatible with DESeq2's modelling framework. Three experimental factors are captured for each of the 12 samples: NaB treatment status (binary: yes/no), inhibitor identity (categorical: none/VPA/VPM), and biological replicate number. The critical statistical decision here is the explicit assignment of reference levels: `"no"` for NaB and `"none"` for Inhibitor. Reference levels define the baseline against which all model coefficients are estimated, that is, by setting untreated, inhibitor-free cells as the reference, the resulting coefficients describe gene expression changes relative to the most biologically neutral condition. Row names are matched to the column names of the count matrix, which is a hard requirement of `DESeqDataSetFromMatrix` for correct sample-data pairing.
+
+## Step 3: Pre-filtering of Low-Count Genes
+
+```{r prefilter}
+# To retain only genes with >= 10 counts in at least 2 samples.
+# This threshold is applied before DESeq2 modelling, not after.
+keep <- rowSums(counts >= 10) >= 2
+
+cat("Genes before filtering:", nrow(counts), "\n")
+cat("Genes after  filtering:", sum(keep),    "\n")
+cat("Genes removed:", nrow(counts) - sum(keep), "\n")
+
+counts_filt <- counts[keep, ]
+```
+
+Pre-filtering of low-count genes as a preparatory step improves DESeq2's statistical performance through two mechanisms. First, genes with near-zero counts across all samples carry no statistical information about differential expression but consume statistical tests, increasing the multiple testing burden and reducing the power of the Benjamini-Hochberg correction to detect true positives among well-expressed genes. Second, and specifically relevant to our dataset, failing to pre-filter causes DESeq2's internal independent filtering algorithm to assign `NA` adjusted p-values to a large proportion of genes, so that thousands of data points would be removed in volcano plots. The threshold of ≥10 counts in ≥2 samples removes only genes with truly negligible expression while retaining genes expressed at biologically relevant levels in at least two samples  including genes expressed specifically in only one condition, which may be biologically important. The requirement for ≥2 samples prevents single-replicate artefacts from passing the filter.
+
+## Step 4: DESeq2 Interaction Model
+
+```{r deseq2, cache=TRUE}
+# Constructing DESeqDataSet with three-term interaction design
+dds <- DESeqDataSetFromMatrix(
+  countData = counts_filt,
+  colData   = meta,
+  design    = ~ NaB + Inhibitor + NaB:Inhibitor
+)
+
+# Fitting the full model - size factor estimation, dispersion estimation, GLM fitting
+dds <- DESeq(dds)
+
+# Extract the two interaction term contrasts
+res_VPA <- results(dds, name = "NaByes.InhibitorVPA", alpha = 0.05)
+res_VPM <- results(dds, name = "NaByes.InhibitorVPM", alpha = 0.05)
+```
+
+The choice of the interaction model `~ NaB + Inhibitor + NaB:Inhibitor` was our main analytical novelty, instead of comparing NaB+VPA versus NaB alone, or NaB+VPM versus NaB alone using a simple two-group pairwise comparison. While computationally straightforward. That approach woud confound the effects of the inhibitor on basal gene expression (i.e. what VPA does to genes in the absence of NaB) with its effect specifically on the NaB response. Genes that are simply regulated by VPA, regardless of NaB  would appear as false positives for the latency-control signature.
+
+The interaction model resolved the ambiguity by partitioning the total variation in gene expression into three components: (1) the main effect of NaB i.e., genes that respond to NaB treatment regardless of inhibitor; (2) the main effect of the inhibitor i.e., genes that respond to VPA or VPM regardless of NaB; and (3) the interaction term NaB:Inhibitor i.e., genes whose response to NaB is specifically and significantly different in the presence of an inhibitor. This third component is biologically meaningful for identifying host factors specifically involved in controlling the lytic switch. A statistically significant interaction term for a given gene means that the combination of NaB + inhibitor has a synergistic or antagonistic effect on that gene's expression that cannot be explained by the sum of the individual effects, precisely the signature expected of genes that mediate the inhibitors' anti-lytic activity.
+
+FDR correction was applied using the Benjamini-Hochberg procedure with a genome-wide significance threshold of α = 0.05, controlling the expected proportion of false positives among all genes called significant.
+
+```{r annot_function}
+# merging DESeq2 results with gene annotation by Entrez Gene ID
+add_annot <- function(res, annotation = annot) {
+  df <- as.data.frame(res) %>%
+    rownames_to_column("GeneID") %>%
+    mutate(GeneID = as.integer(GeneID)) %>%
+    left_join(annotation %>% dplyr::select(GeneID, Symbol, Description),
+              by = "GeneID")
+  df
+}
+
+res_VPA_df <- add_annot(res_VPA)
+res_VPM_df <- add_annot(res_VPM)
+
+# Filtering to statistically significant genes meeting strict fold-change threshold
+sig_VPA <- res_VPA_df %>% filter(padj < 0.05, abs(log2FoldChange) > 1)
+sig_VPM <- res_VPM_df %>% filter(padj < 0.05, abs(log2FoldChange) > 1)
+
+cat("Significant genes - VPA interaction (|LFC|>1, padj<0.05):", nrow(sig_VPA), "\n")
+cat("Significant genes - VPM interaction (|LFC|>1, padj<0.05):", nrow(sig_VPM), "\n")
+```
+
+## Step 5: Volcano Plot Visualisation
+
+```{r volcano_function}
+# Generate volcano plot
+make_volcano <- function(res_df, title, top_n = 15) {
+  df <- res_df %>%
+    mutate(
+      # Classify each gene as significantly up, down, or not significant
+      Significance = case_when(
+        padj < 0.05 & log2FoldChange >  1 ~ "Up",
+        padj < 0.05 & log2FoldChange < -1 ~ "Down",
+        TRUE ~ "NS"
+      ),
+      neg_log10_padj = -log10(padj)
+    ) %>%
+    filter(!is.na(padj))  # Remove genes with NA padj (insufficient data)
+
+  # Selecting the top most significant genes for labelling
+  top_genes <- df %>%
+    filter(Significance != "NS") %>%
+    arrange(padj) %>%
+    slice_head(n = top_n)
+
+  ggplot(df, aes(x = log2FoldChange, y = neg_log10_padj)) +
+    geom_point(aes(color = Significance), alpha = 0.6, size = 1.8) +
+    # Non-overlapping labels using ggrepel
+    geom_label_repel(
+      data          = top_genes,
+      aes(label     = Symbol),
+      size          = 2.8,
+      max.overlaps  = 20,
+      box.padding   = 0.3,
+      segment.color = "grey"
+    ) +
+    scale_color_manual(
+      values = c("Up" = "red", "Down" = "blue", "NS" = "grey")
+    ) +
+    # Significance threshold lines
+    geom_vline(xintercept = c(-1, 1), linetype = "dashed",
+               color = "black", linewidth = 0.4) +
+    geom_hline(yintercept = -log10(0.05), linetype = "dashed",
+               color = "black", linewidth = 0.4) +
+    labs(
+      title    = title,
+      subtitle = paste0("Significant: ",
+                        sum(df$Significance != "NS", na.rm = TRUE),
+                        " genes  (|LFC|>1, padj<0.05)"),
+      x        = expression(log[2]~Fold~Change),
+      y        = expression(-log[10]~(adjusted~italic(p)~value)),
+      color    = NULL
+    ) +
+    theme_classic(base_size = 13) +
+    theme(plot.title = element_text(face = "bold"), legend.position = "top")
+}
+```
+
+```{r volcano_vpa, fig.cap="Volcano plot for the VPA x NaB interaction contrast. Each point represents one gene. Red: significantly up-regulated (log2FC > 1, padj < 0.05); blue: significantly down-regulated; grey: not significant. Top 15 most significant genes by adjusted p-value are labelled. Dashed vertical lines indicate |log2FC| = 1; dashed horizontal line indicates padj = 0.05."}
+p_vpa <- make_volcano(res_VPA_df, "VPA x NaB Interaction")
+print(p_vpa)
+```
+
+```{r volcano_vpm, fig.cap="Volcano plot for the VPM x NaB interaction contrast. Compared to the VPA plot, substantially fewer significant genes are observed, reflecting VPM's lower HDAC inhibitory potency. Key labelled genes include EGR1, SESN2, SREBF1, SLC27A1, HIP1, and VCL, each providing distinct mechanistic insights into how VPM specifically blocks lytic reactivation."}
+p_vpm <- make_volcano(res_VPM_df, "VPM x NaB Interaction")
+print(p_vpm)
+```
+
+## Step 6: Core Signature- Concordant Overlap
+
+```{r core_signature}
+# Relaxed fold-change threshold (|LFC| > 0.8) to obtain sufficient genes for meaningful pathway enrichment analysis.
+# The strict |LFC| > 1 threshold yields too few genes for enrichment.
+sig_VPA_relax <- res_VPA_df %>%
+  filter(!is.na(Symbol), padj < 0.05, abs(log2FoldChange) > 0.8)
+
+sig_VPM_relax <- res_VPM_df %>%
+  filter(!is.na(Symbol), padj < 0.05, abs(log2FoldChange) > 0.8)
+
+# Inner join: only genes significant in BOTH contrasts
+merged_overlap <- inner_join(
+  sig_VPA_relax %>% dplyr::select(Symbol,
+                                   lfc_VPA  = log2FoldChange,
+                                   padj_VPA = padj),
+  sig_VPM_relax %>% dplyr::select(Symbol,
+                                   lfc_VPM  = log2FoldChange,
+                                   padj_VPM = padj),
+  by = "Symbol"
+) %>%
+  # Concordance filter: same direction of change in BOTH inhibitor contrasts
+  filter(sign(lfc_VPA) == sign(lfc_VPM))
+
+cat("Core signature genes (concordant, |LFC|>0.8):", nrow(merged_overlap), "\n")
+
+final_common_genes <- merged_overlap$Symbol
+```
+
+The concordant overlap strategy was preffered over a simple union or simple intersection. A union would include genes significant in either contrast, producing a large, heterogeneous list that merges VPA-specific and VPM-specific effects. A simple intersection without the concordance filter would include genes that could theoretically be up-regulated by VPA and down-regulated by VPM (or vice versa), representing compound-specific off-target effects rather than a shared mechanism. By requiring both statistical significance in both contrasts, and in the the same direction of change (sign concordance), we ensure that every gene in the core signature represents a truly shared host transcriptional response: one that both HDAC inhibitors, despite their structural differences and different potencies, consistently reverse. This is the most biologically interpretable and stringent definition of a "shared mechanism" given this experimental design.
+
+## Step 7: Heatmap of Core Signature
+
+```{r heatmap_prep}
+# Applying variance-stabilising transformation for visualisation
+# blind=FALSE uses the design to estimate dispersions more accurately
+vst_mat <- assay(vst(dds, blind = FALSE))
+
+# Remap Entrez Gene ID rownames to gene symbols
+sym_map  <- setNames(annot$Symbol, as.character(annot$GeneID))
+vst_syms <- sym_map[rownames(vst_mat)]
+# make.unique handles rare cases of duplicate symbols (e.g. pseudogenes)
+vst_syms <- make.unique(ifelse(is.na(vst_syms), rownames(vst_mat), vst_syms))
+rownames(vst_mat) <- vst_syms
+
+# Subsetting to core signature genes
+genes_in_mat <- intersect(final_common_genes, rownames(vst_mat))
+heatmap_mat  <- vst_mat[genes_in_mat, , drop = FALSE]
+cat("Genes available in heatmap:", nrow(heatmap_mat), "\n")
+
+# Sample annotation for column colour bars
+col_annot <- data.frame(
+  NaB       = meta$NaB,
+  Inhibitor = meta$Inhibitor,
+  row.names = rownames(meta)
+)
+annot_colors <- list(
+  NaB       = c(no = "turquoise", yes = "red"),
+  Inhibitor = c(none = "lightgreen", VPA = "blue", VPM = "navy")
+)
+```
+
+```{r heatmap_plot, fig.height=9, fig.width=8, fig.cap="Hierarchical clustering heatmap of the core EBV reactivation-control signature. Expression values are variance-stabilised (VST) and row-scaled (z-score). Each row is one gene; each column is one sample. Column annotation bars indicate NaB treatment status (top) and inhibitor condition (bottom). Two major gene clusters are evident: an upper cluster of latency-maintenance factors suppressed by NaB and restored by inhibitors, and a lower cluster of lytic-facilitating factors activated by NaB and reversed by inhibitors."}
+pheatmap(
+  heatmap_mat,
+  scale             = "row",   # Z-score per gene (row)
+  main              = "Core EBV Reactivation-Control Signature (VST-normalised)",
+  cluster_rows      = TRUE,
+  cluster_cols      = TRUE,
+  annotation_col    = col_annot,
+  annotation_colors = annot_colors,
+  show_rownames     = TRUE,
+  show_colnames     = FALSE,
+  fontsize_row      = 10,
+  fontsize          = 11,
+  cellwidth         = 35,
+  cellheight        = 18,
+  border_color      = NA,
+  color = colorRampPalette(c("navy", "lightgreen", "red"))(100)
+)
+```
+
+**Why VST normalisation, not raw counts, for the heatmap?**
+
+Raw RNA-seq counts exhibit a strong mean-variance relationship: genes with higher mean expression inherently show greater absolute variance. In a heatmap, this means that visual intensity differences would reflect expression level differences (highly expressed genes appear more colourful) rather than biologically meaningful differential expression patterns. Variance-stabilising transformation (VST), implemented in DESeq2 by the `vst()` function, applies a data-driven regularised log transformation that equalises variance across the entire range of expression values, producing homoscedastic data where colour differences in the heatmap reflect true relative differences in expression rather than absolute statistica noise (Love,  Huber & Anders, 2014). VST-normalised values are, however appropriate only for visualisation because the DESeq2 statistical model internally operates exclusively on raw integer counts.
+
+Row z-score scaling (subtract row mean, divide by row standard deviation) is applied as a second normalisation layer so that each gene's colour pattern reflects its relative expression across the 12 conditions rather than its absolute expression level. This allows direct visual comparison of expression trajectories across genes with very different baseline abundances, which is essential when a heatmap contains genes whose raw VST values might differ by an order of magnitude.
+
+## Step 8: Functional Enrichment Analysis
+
+```{r id_mapping}
+# Converting gene symbols to Entrez IDs required by enrichment tools
+id_map <- bitr(final_common_genes,
+               fromType = "SYMBOL",
+               toType   = "ENTREZID",
+               OrgDb    = org.Hs.eg.db)
+
+cat("Genes successfully mapped to Entrez IDs:", nrow(id_map), "\n")
+```
+
+Gene symbol-to-Entrez ID conversion is a necessary preprocessing step because the enrichment databases (Reactome, Gene Ontology) use Entrez IDs as their primary gene identifier system. The `bitr()` function from `clusterProfiler` performs this mapping using the `org.Hs.eg.db` annotation package, which contains the complete NCBI-curated human genome annotation. Genes that fail to map (e.g. lncRNAs, pseudogenes, or novel genes not yet in NCBI) are silently excluded which is an important limitation when interpreting enrichment results, as some biologically relevant genes may be missed due to incomplete database coverage.
+
+### Reactome Pathway Enrichment
+
+```{r reactome, fig.cap="Reactome pathway enrichment dotplot for the 127-gene core signature. Each dot represents one enriched pathway. Dot size reflects the number of signature genes in that pathway (gene count); dot colour reflects the adjusted p-value (darker = more significant). The RHO GTPase cycle is the only statistically significant pathway (padj = 0.016), with 12 of the 127 core signature genes mapping to this pathway, representing a 4.1-fold enrichment over the genomic background."}
+reactome_res <- enrichPathway(
+  gene         = id_map$ENTREZID,
+  organism     = "human",
+  pvalueCutoff = 0.05,
+  qvalueCutoff = 0.2,
+  readable     = TRUE    # To display gene symbols rather than Entrez IDs
+)
+
+cat("\nReactome Pathways\n")
+print(head(as.data.frame(reactome_res), 10))
+
+p_react <- dotplot(reactome_res, showCategory = 10) +
+  ggtitle("Reactome Pathways - Core Signature") +
+  theme_classic(base_size = 12)
+print(p_react)
+```
+
+### GO Biological Process Enrichment
+
+```{r gobp, fig.cap="GO Biological Process enrichment dotplot for the 127-gene core signature. Cutoffs were relaxed (pvalueCutoff = 0.1, qvalueCutoff = 0.5, minGSSize = 3) to compensate for the reduced statistical power inherent to small input gene sets. Positive regulation of miRNA metabolic process is enriched at borderline significance (padj = 0.076), with 5 signature genes (NFKB1, EGR1, NEAT1, FOS, SREBF1) mapping to this GO term, representing a 13.2-fold enrichment over background."}
+go_bp <- enrichGO(
+  gene          = id_map$ENTREZID,
+  OrgDb         = org.Hs.eg.db,
+  ont           = "BP",            # Biological Process sub-ontology
+  pAdjustMethod = "BH",            # Benjamini-Hochberg FDR correction
+  pvalueCutoff  = 0.1,             # Relaxed to compensate for small gene set
+  qvalueCutoff  = 0.5,
+  minGSSize     = 3,               # Permit small GO categories
+  readable      = TRUE
+)
+
+print(head(as.data.frame(go_bp), 10))
+
+p_go <- dotplot(go_bp, showCategory = 15) +
+  ggtitle("GO Biological Process - Core Signature") +
+  theme_classic(base_size = 12)
+print(p_go)
+```
+
+Two complementary enrichment databases were queried to maximise coverage of the biological landscape. Reactome provides manually curated, hierarchically organised biochemical pathway annotations with superior mechanistic resolution, making it powerful for identifying specific molecular mechanisms (Yu & He, 2016). GO Biological Process provides broader, ontology-based functional categories that capture higher-level biological themes not necessarily represented as discrete biochemical pathways. The use of both databases reduces the risk of missing relevant biology that is well annotated in one resource but not the other.
+
+The relaxed GO cutoffs (pvalueCutoff = 0.1, minGSSize = 3) were applied because the statistical power of enrichment tests were based on the hypergeometric distribution scales with input gene set size. With 127 genes from a restricted concordant signature, the denominator of the GeneRatio is modest, limiting the enrichment z-score achievable for any given term. Results from the GO analysis should therefore be interpreted as hypothesis-generating rather than statistically conclusive.
+
+```{r save_results, eval=FALSE}
+# Save all outputs for records and downstream use
+write.csv(as.data.frame(reactome_res), "Reactome_Results.csv",     row.names = FALSE)
+write.csv(as.data.frame(go_bp),        "GO_BP_Results.csv",        row.names = FALSE)
+write.csv(merged_overlap,              "Core_Signature_genes.csv", row.names = FALSE)
+sink("session_info.txt"); sessionInfo(); sink()
+cat("\nAll output files written.\n")
+```
+
+\newpage
+
+# Results
+
+## Pre-processing and Filtering
+
+Prior to differential expression analysis, the raw count matrix contained `r nrow(counts)` genes. Following the pre-filtering step (requiring ≥10 counts in ≥2 samples), `r sum(keep)` genes were retained for statistical modelling, representing genes with reliable expression signals across the 12 samples. This filtering removed `r nrow(counts) - sum(keep)` genes, predominantly background noise, pseudogenes, and very lowly expressed transcripts that would have diluted statistical power and inflated the multiple testing correction burden.
+
+## Differential Expression: Interaction Model Output
+
+The DESeq2 NaB × Inhibitor interaction model identified substantial transcriptional responses in both inhibitor contrasts, but of markedly different magnitudes. Applying thresholds of |log2FC| > 1 and padj < 0.05:
+
+- **VPA × NaB contrast:** 1,309 significant genes, indicating great reversal of the NaB-driven transcriptional programme by valproate.
+- **VPM × NaB contrast:** 90 significant genes, confirming VPM as a functional but substantially less potent lytic suppressor.
+
+The approximately 14.5-fold difference in the number of significant genes between VPA and VPM contrasts  has several levels of biological interpretations. Valproate (VPA) is a branched short-chain fatty acid with a broad spectrum of pharmacological targets beyond HDAC inhibition, including inhibition of GSK-3β (a regulator of Wnt/β-catenin signalling), modulation of mTOR pathway activity, and suppression of voltage-gated sodium channels (Gorres, Reineke & Miller, 2024). Valpromide (VPM) is the amide derivative of VPA and retains HDAC inhibitory activity but lacks many of VPA's secondary targets, making its transcriptional footprint more focused. This pharmacological distinction is directly reflected in the magnitude of transcriptional effects observed: VPA induces a broad, genome-wide epigenetic reprogramming, while VPM produces a more targeted but mechanistically coherent signature.
+
+## Volcano Plots: Biological Patterns
+
+### VPA × NaB Interaction (Figure 1)
+
+The VPA volcano plot reveals an asymmetric pattern dominated by down-regulation, with the most statistically significant genes concentrated on the left side of the plot (negative log2FC values). This indicates that NaB-induced lytic reactivation predominantly requires activation of host gene expression programmes, incuding transcription factors, signalling mediators, and metabolic enzymes  that VPA systematically reverses. The most significantly down-regulated genes and their mechanistic significance include:
+
+- **FGD4** (padj of 10^-40): The most statistically significant down-regulated gene in the VPA contrast. FGD4 encodes a guanine nucleotide exchange factor (GEF) for CDC42, a member of the RHO GTPase family. Its extreme significance directly links to the RHO GTPase cycle pathway identified in enrichment analysis and suggests that CDC42 activation through FGD4 is a critical host requirement for EBV lytic replication (Whitehead et. al., 1998).
+
+- **DYRK3** (padj of 10^-36): Dual-specificity tyrosine-regulated kinase 3 regulates the dynamics of membraneless organelles including stress granules and P-bodies. Stress granules are cytoplasmic RNA-protein condensates that sequester mRNAs and translation factors during cellular stress and are known to restrict viral replication by entrapping viral RNA. DYRK3 promotes stress granule dissolution; its down-regulation by VPA would therefore sustain stress granules in an assembled, antiviral state (Gorres, Reineke & Miller, 2024)
+
+- **PER1** (padj of 10^-34): Period Circadian Regulator 1 is a core component of the mammalian circadian clock. Emerging evidence from the herpesvirus research indicates that circadian rhythms influence the efficiency of viral reactivation, with lytic reactivation occurring preferentially during specific circadian phases. (Tang et. al, 2025). PER1 suppression during NaB treatment suggests that EBV may exploit circadian dysregulation to optimise the cellular environment for viral DNA replication (Kenney & Mertz, 2014).
+
+- **GLI1** (padj of 10^-27): The transcriptional effector of Hedgehog (Hh) signalling. GLI1 down-regulation by VPA suggests that Sonic Hedgehog pathway activation is a component of the NaB-induced lytic programme. Hedgehog signalling promotes cell cycle progression through S-phase, which would increase the availability of cellular DNA polymerases and nucleotide pools required for viral genome replication (Iriana et. al, 2021).
+
+- **APAF1** (padj of 10^-25): Apoptotic Peptidase Activating Factor 1 is the key protein of the apoptosome, a complex that switches on caspases responsible for programmed cell death Its down-regulation during NaB-induced lytic reactivation represents an EBV immune evasion strategy: by suppressing the apoptotic machinery, the virus protects infected cells from death long enough to complete the full lytic replication cycle and produce infectious virions. VPA's reversal of this effect would restore apoptotic competence and potentially limit the window for productive lytic replication (Gortat et. al., 2015).
+
+- **STAT3** (padj of 10^-24): Signal Transducer and Activator of Transcription 3 mediates interleukin-6 and interleukin-10 signalling in B lymphocytes and promotes cell survival, proliferation, and immune evasion. STAT3 activation is required for B-cell survival during the lytic cycle and its suppression by VPA disrupts the pro-survival signalling that supports infected cell viability during viral replication (Chang et. al, 2018).
+
+- **DACT3** (padj of 10^-32): Dishevelled Binding Antagonist of Beta Catenin 3 is an endogenous inhibitor of the Wnt/β-catenin signalling pathway. Its pronounced down-regulation (log2FC  of approx. -5.5) indicates de-repression of Wnt signalling during NaB-induced lytic reactivation. Wnt/β-catenin signalling regulates cytoskeletal organisation and membrane dynamics, which are both essential for the assembly of the viral tegument and the budding of enveloped virions from the nucleus. VPA-mediated restoration of DACT3 would re-suppress Wnt signalling and disrupt these cytoskeletal processes (Jiang et. al, 2008).
+
+The up-regulated genes in the VPA contrast (red points, right side) are fewer in number, consistent with the interpretation that VPA primarily acts by restoring transcriptional repression programmes rather than by activating novel gene expression. The most statistically significant up-regulated gene, **ZFP91** (padj of 10^-24), encodes an atypical E3 ubiquitin ligase that regulates NF-κB signalling and has been linked to lymphocyte survival regulation.
+
+### VPM × NaB Interaction (Figure 2)
+
+The VPM volcano plot displays a quantitatively smaller but biologically coherent signature of 90 significant genes (|LFC| > 1, padj < 0.05). The reduced number of significant genes reflects VPM's narrower pharmacological target spectrum compared to VPA. Despite this quantitative difference, the top hits in the VPM contrast include several genes of outstanding mechanistic significance:
+
+- **SESN2** (padj of 10^-13, the most significant gene in the VPM contrast): Sestrin 2 is a stress-responsive metabolic regulator that inhibits mTORC1 (mechanistic target of rapamycin complex 1) and activates autophagy in response to oxidative stress, DNA damage, and energy deprivation. During NaB-induced EBV lytic reactivation, SESN2 is down-regulated, suggesting that lytic replication requires active mTORC1 signalling to sustain the elevated protein synthesis rates needed for virion structural protein production. VPM's restoration of SESN2 expression would reinstate mTORC1 inhibition and autophagy, creating a cellular metabolic environment incompatible with the anabolic demands of viral replication (Parmigiani et. al., 2014).
+
+- **SREBF1** (padj of 10^-13, co-equal significance with SESN2): Sterol Regulatory Element Binding Transcription Factor 1 is the master transcriptional regulator of lipid and cholesterol biosynthesis. During NaB-induced lytic reactivation, SREBF1 is markedly down-regulated, implicating lipid metabolic reprogramming as a previously underappreciated component of the lytic switch machinery. Enveloped viruses including EBV require host-derived phospholipids and cholesterol for the biosynthesis of the viral envelope that encases each virion particle. SREBF1 activation would supply these lipid building blocks by transcriptionally inducing enzymes of the mevalonate pathway and fatty acid synthesis. VPM-mediated suppression of SREBF1 would deprive the lytic cycle of the membrane material required for virion assembly and budding (Geng & Guo, 2024).
+
+- **SLC27A1** (FATP1-Solute Carrier Family 27 Member 1): A long-chain fatty acid transporter that facilitates cellular uptake of exogenous fatty acids from the extracellular environment. Its co-down-regulation with SREBF1 in the VPM contrast provides convergent evidence for lipid supply as a host requirement: EBV appears to co-opt both intracellular lipid biosynthesis (via SREBF1) and exogenous fatty acid import (via SLC27A1) to meet the membrane lipid demands of virion production (Black & DiRusso, 2003)
+
+- **EGR1** (padj < 10^-6): Early Growth Response 1 is a zinc-finger immediate-early transcription factor that is rapidly and transiently induced by diverse stimuli including growth factors, cytokines, and HDAC inhibitors. Critically, EGR1 has been shown to directly bind the promoter of the EBV immediate-early gene BZLF1 and transactivate its expression, thereby triggering the cascade of lytic gene expression (Gorres, Reineke & Miller, 2024). Its down-regulation by VPM represents a mechanistically direct blockade of the lytic initiation cascade: without sufficient EGR1 activity, BZLF1 transcription is attenuated and the virus cannot make the irreversible commitment to the lytic programme. This makes EGR1 one of the most compelling mechanistic targets identified in this study.
+
+- **HIP1** (Huntingtin Interacting Protein 1): A component of clathrin-coated vesicles involved in endocytosis and actin cytoskeletal dynamics. HIP1's down-regulation in the VPM contrast, combined with its appearance as a significant gene in the VPA contrast, places it in the category of genes consistently targeted by both inhibitors (Wilbur et. al, 2008). 
+
+## Core Concordant Signature
+The intersection of genes significant in both the VPA and VPM interaction contrasts, requiring directional concordance, yielded **127 genes** constituting the core EBV reactivation-control signature. This signature represents host genes that are consistently and reproducibly reversed by both inhibitors across the full experiment, providing the highest-confidence candidates for host factors genuinely involved in the latency-versus-lytic decision in EBV-positive Burkitt lymphoma cells.
+
+Selected notable genes from the core signature and their biological significance are presented below:
+
+| Gene | LFC (VPA) | LFC (VPM) | Function and Mechanistic Significance |
+|------|-----------|-----------|---------------------------------------|
+| EGR1 | -2.82 | -2.90 | Immediate-early TF; BZLF1 transactivator; direct trigger of lytic cascade |
+| FGD4 | -3.25 | -1.06 | CDC42 GEF; RHO GTPase activation; cytoskeletal remodelling for virion egress |
+| GLI1 | -3.40 | -1.00 | Hedgehog effector; cell cycle promotion; viral DNA replication support |
+| NCKAP5L | -3.12 | -2.21 | Actin cytoskeleton regulation; vesicular trafficking |
+| FOS  | -3.24 | -1.94 | AP-1 TF; BZLF1 promoter co-activator; lytic gene induction |
+| NFKB1 | +1.08 | +1.03 | NF-κB p50; B-cell survival and antiviral innate immunity |
+| EBF1 | -1.23 | -1.06 | B-cell identity TF; maintains B-cell developmental programme |
+| TRIM8 | +1.06 | +0.89 | E3 ubiquitin ligase; antiviral innate immune restriction |
+| NEAT1 | -1.60 | -1.05 | Nuclear lncRNA; paraspeckle component; innate immune gene regulation |
+| SREBF1 | -1.16 | -1.28 | Lipid biosynthesis master TF; viral envelope membrane supply |
+| ARHGAP11B | +1.25 | +0.91 | RHO GTPase-activating protein; links core signature to Reactome finding |
+| RASAL2 | -2.06 | -1.70 | RAS/RHO GAP; cytoskeletal and vesicular trafficking regulation |
+| SESN2 | -0.91 | -1.29 | mTORC1 inhibitor; metabolic stress sensor; autophagy regulator |
+
+## Heatmap: Coordinated Expression Patterns
+
+The hierarchical clustering heatmap of the 127-gene core signature (Figure 3) provides compelling visual evidence of two coordinately regulated gene modules with opposing expression trajectories across the experimental conditions.
+
+The **upper cluster**- comprising genes including NFKB1, EBF1, TRIM8, TLK1, BRD1, PTPN7, IFNLR1, SLC20A1, CASD1, CLEC2D, TRDC, ARHGAP11B, ZNF282, SNTB1, ZFP64, and SENP6 displays a characteristic pattern: high expression (red) in untreated and inhibitor-only conditions, pronounced suppression (blue) specifically in NaB-treated samples, and near-complete restoration of expression in NaB + VPA and NaB + VPM conditions. This expression trajectory is the molecular hallmark of a **latency-maintenance programme**: a set of host factors whose expression must be actively suppressed by EBV to successfully transition to the lytic cycle, and whose expression is restored when HDAC inhibitors block this transition. The presence of NFKB1 in this cluster is critica: NF-κB p50 is a central regulator of B-cell survival, antiviral innate immunity, and MHC class I expression. Its suppression during lytic induction would impair antiviral cytokine responses and reduce the immunological visibility of lytically infected cells, potentially allowing the lytic cycle to proceed without triggering effective anti-viral immune clearance of infected cells (Woellmer & Hammerschmidt, 2013).
+
+The **lower cluster**- including EGR1, NEAT1, RASAL2, NDRG4, SESN2, CTH, CAND2, RASL10A, LOC105370363, PDLIM7, SLC26A2, RAB26, SAMD12, IQSEC1, TMEM154, GOLGA2P10, TOX2, and EBF1  displays the inverse pattern: low or intermediate expression in untreated cells, strong induction during NaB treatment, and reversal toward baseline upon inhibitor co-treatment. This pattern is consistent with **lytic-facilitating host factors**, genes whose up-regulation by EBV creates the cellular environment required for productive lytic replication and which the HDAC inhibitors suppress. EGR1's being in this cluster is mechanistically consistent with its role as a BZLF1 transactivator, that is, EBV would benefit from EGR1 up-regulation during lytic induction. Similarly, RAB26 encodes a small GTPase involved in lysosomal exocytosis and autophagosome formation, which are processes that may contribute to the secretory pathway used for virion egress(movement).
+
+Sample clustering of the 12 columns provides additional validation of the biological signal. NaB-treated samples (GSM IDs corresponding to NaB rep1 and NaB rep2) cluster distinctly and separately from all other conditions, reflecting the profound transcriptional reprogramming induced by lytic reactivation. NaB + VPA and NaB + VPM samples cluster substantially closer to untreated controls than to NaB-only samples, providing visual confirmation at the transcriptome level that HDAC inhibitors transcriptionally restore a latency-like host expression state (Gorres, Reineke, & Miller, 2024)
+
+## Pathway Enrichment Results
+
+### Reactome Enrichment: RHO GTPase Cycle
+
+The Reactome pathway enrichment analysis identified **one statistically significant pathway: the RHO GTPase cycle** (Reactome ID: R-HSA-9012999; padj = 0.016; GeneRatio = 12/75; fold enrichment = 4.07). Twelve core signature genes mapped to this pathway: RASAL2, ARHGAP26, FGD2, ARHGAP18, DOCK4, RHPN1, SH3PXD2A, FGD4, RND1, TMPO, ARHGAP11B, and MTMR1.
+
+The RHO GTPase family (comprising RHOA, RAC1, CDC42, and their regulators) are main controllers of the actin cytoskeleton. They cycle between an inactive GDP-bound form and an active GTP-bound form under the opposing regulation of GEFs (guanine nucleotide exchange factors, which activate GTPases) and GAPs (GTPase-activating proteins, which inactivate GTPases). This regulatory cycle controls actin polymerisation, lamellipodia and filopodia formation, contractile fibre assembly, and vesicular trafficking (Lieberman, 2013).
+
+For EBV lytic replication, RHO GTPase activity is required at three sequential and distinct steps. First, nuclear egress: herpesviruses must transport newly assembled capsids across the nuclear lamina into the cytoplasm through a process of primary envelopment at the inner nuclear membrane followed by de-envelopment at the outer nuclear membrane, a process dependent on RHOA-mediated lamins phosphorylation and nuclear actin dynamics. Second, cytoplasmic envelopment: capsids acquire their final lipid envelope by budding into cytoplasmic vesicles derived from the trans-Golgi network and early endosomes, a process that requires RAC1-mediated membrane curvature and CDC42-dependent vesicular trafficking. Third, virion secretion: mature enveloped virions are transported along microtubule and actin tracks to the plasma membrane for exocytosis, driven by RHO GTPase-dependent cytoskeletal dynamics (Woellmer & Hammerschmidt, 2013).
+
+The enrichment of 12 core signature genes in this pathway, several of them being GAPs (ARHGAP11B, ARHGAP18, ARHGAP26, RASAL2) or GEFs (FGD2, FGD4) that directly regulate RHO GTPase cycling suggests that both activating and inactivating regulators of this pathway are coordinately modulated during EBV lytic reactivation and reversed by HDAC inhibitors. From a translational perspective, the RHO GTPase pathway is pharmacologically tractable: ROCK (RHO-associated coiled-coil kinase) inhibitors such as Y-27632 and fasudil are clinically available, and their co-administration with NaB could be tested as a strategy to pharmacologically suppress lytic reactivation independently of the HDAC inhibitory mechanism.
+
+### GO Biological Process: miRNA Metabolic Process Regulation
+
+GO Biological Process enrichment identified **positive regulation of miRNA metabolic process** (GO:2000630; padj = 0.076; GeneRatio = 5/110; fold enrichment = 13.2) as a borderline-significant finding. Five core signature genes map to this term: **NFKB1, EGR1, NEAT1, FOS, and SREBF1**.
+
+This finding is biologically coherent and credible despite its borderline statistical significance. EBV encodes approximately 44 mature microRNAs from two genomic loci i.e., the BART (BamHI-A Region Transcript) and BHRF1 loci that together regulate hundreds of host mRNA targets. EBV miRNAs suppress antiviral host responses by targeting interferon signalling components, pro-apoptotic proteins, and immune recognition molecules, thereby protecting latently infected B cells from immune destruction (Lieberman, 2013). In contrast, host-encoded miRNAs can target viral transcripts, i.e., the viral immediate-early mRNA BZLF1 contains binding sites for several host miRNAs, and elevated host miRNA activity would be expected to silence BZLF1 and maintain latency. The enrichment of regulatory proteins for miRNA metabolism, whereby NFKB1 and FOS are transcription factors known to regulate Drosha/Dicer expression, NEAT1 modulates miRNA processing through paraspeckle regulation, and SREBF1 and EGR1 regulate miRNA transcription suggests that HDAC inhibitors may restore host miRNA processing capacity as an additional layer of latency maintenance. This would constitute a post-transcriptional silencing mechanism operating in parallel to the transcriptional reprogramming identified through the interaction model.
+
+The borderline significance (padj = 0.076) should be interpreted in the context of the statistical constraints of over-representation analysis with a small gene set, i.e., with only 127 genes as input, the hypergeometric test has limited power to detect enrichment in most GO categories, and a fold enrichment of 13.2x with five mapping genes represents a substantial biological signal even if it does not reach the conventional FDR threshold of 5%.
+
+\newpage
+
+# Discussion
+
+## Integrated Mechanistic Model
+
+Synthesising the evidence across all analytical outputs, we propose that VPA and VPM maintain EBV latency through three convergent and complementary host transcriptional mechanisms that together create a cellular environment incompatible with productive lytic replication.
+
+**Mechanism 1: Restoration of B-cell Identity and Antiviral Innate Immunity:**
+The upper heatmap cluster and the presence of NFKB1, EBF1, and TRIM8 in the core signature identify a programme of B-cell identity and innate immune gene expression that NaB suppresses during lytic induction and that HDAC inhibitors restore. NF-KB (encoded by NFKB1) is the main transcription factor of B-cell survival and antiviral innate immunity, coordinating the expression of interferon-stimulated genes, pro-survival BCL-2 family members, and MHC class I molecules. EBV's suppression of NFKB1 during lytic induction likely serves the dual purpose of reducing antiviral immune signalling that would limit the lytic cycle and of reducing the immunological visibility of lytically infected cells. TRIM8, an E3 ubiquitin ligase with established antiviral activity, would normally target viral proteins for proteasomal degradation,  its suppression by NaB would relieve this restriction. VPA and VPM, by restoring expression of these factors, recreate the innate immune restriction landscape of latently infected B cells, in which viral replication is continuously suppressed (Woellmer & Hammerschmidt, 2013).
+
+**Mechanism 2: Suppression of RHO GTPase-Dependent Cytoskeletal Remodelling:**
+The Reactome enrichment result and the distribution of cytoskeletal regulators across the core signature identify RHO GTPase cycle modulation as the most statistically robust finding of this study. During NaB-induced lytic reactivation, RHO GTPase regulators including FGD4 (a CDC42 activator), FGD2 (another RHO family GEF), and RASAL2 (a RAS/RHO GAP) are differentially regulated in a pattern consistent with net activation of cytoskeletal dynamics required for viral capsid trafficking, nuclear egress, and virion exocytosis. The down-regulation of multiple GAPs (ARHGAP11B, ARHGAP18, ARHGAP26) in the lower heatmap cluster during NaB treatment would reduce GTPase inactivation, effectively shifting the balance toward active GTP-bound RHO GTPases. VPA and VPM reverse this balance by restoring GAP expression (particularly ARHGAP11B, which shows positive LFC in both contrasts), maintaining RHO GTPases in their inactive state and preventing the cytoskeletal remodelling required for virion egress (Lieberman, 2013).
+
+**Mechanism 3: Disruption of Lipid Metabolic Reprogramming and miRNA Suppression:**
+The co-significant down-regulation of SREBF1 and SLC27A1 in the VPM contrast, and their presence in the core signature, identifies lipid metabolic reprogramming as a third mechanism through which HDAC inhibitors suppress the lytic cycle. The convergent suppression of both de novo lipid biosynthesis (SREBF1-driven) and exogenous fatty acid import (SLC27A1-mediated) suggests that EBV mounts a coordinated campaign to maximise the cellular lipid supply during lytic replication, using host lipids as raw material for viral envelope biosynthesis. The miRNA metabolic process finding adds a post-transcriptional dimension: restoration of host miRNA processing by VPA/VPM would reinforce the transcriptional latency programme with an additional layer of gene silencing, potentially targeting BZLF1 mRNA directly (Kenney & Mertz, 2014).
+
+## Significance of the Interaction Model Approach
+
+The use of the NaB × Inhibitor interaction model represents a key methodological strength of this study compared to simpler pairwise comparison approaches. By correctly partitioning variance between the main effects of NaB and the inhibitors and their interaction, the model identifies genes specifically involved in the differential response to NaB in the presence of each inhibitor, eliminating the large class of false positives that would arise from genes simply regulated by VPA or VPM per se. This analytical precision is what enables the mechanistic specificity of the findings, i.e., the core signature genes are not merely drug-responsive genes but are specifically and reproducibly involved in the host transcriptional response that distinguishes lytic induction from latency maintenance.
+
+## Limitations
+
+We acknowledge the  following limitations of this work:
+
+1. **Minimal replication:** Two biological replicates per condition is below the minimum recommended for robust differential expression analysis. DESeq2's empirical Bayes dispersion shrinkage partially compensates for this, but the risk of false positives from sample-specific variation cannot be fully eliminated with n = 2.
+2. **Single cell line and time point:** HH514-16 cells represent one specific EBV-positive BL genetic background. The 6-hour treatment window captures early transcriptional events but may miss later regulatory events such as translational regulation and post-translational modifications that occur during lytic replication.
+3. **Enrichment power constraints:** The 127-gene core signature, while larger than initially anticipated, still represents a small input for pathway enrichment. The single significant Reactome pathway and borderline GO result reflect this limitation, a larger concordant signature would afford more comprehensive pathway coverage.
+4. **Correlational nature of transcriptomics:** All findings are associations based on observational RNA-seq data. Causal roles of specific genes in the latency-lytic switch must be validated through orthogonal experimental approaches including CRISPR loss-of-function screens, protein-level validation, and virus-production assays.
+5. **Distinction between NaB and physiological reactivation:** NaB induces EBV reactivation through a non-physiological mechanism. The relevance of the identified host signature to physiologically triggered reactivation (e.g. by B-cell receptor stimulation or plasma cell differentiation) requires investigation.
+
+## Possibe Future Directions
+
+Based on the findings of this study, we propose the following priorities for future investigation and studies:
+
+- Pharmacological testing of ROCK inhibitors (Y-27632, fasudil) as EBV lytic suppressors, either alone or in combination with VPA/VPM.
+- Lipidomic profiling of NaB-treated versus inhibitor-treated cells to quantify lipid metabolic reprogramming and viral envelope composition.
+- Small RNA sequencing to directly measure changes in host and EBV-encoded miRNA populations during lytic induction and inhibitor treatment.
+- Extension of the analysis to additional EBV-positive cell lines and primary patient-derived B cells to test generalisability.
+- RNA-seq time course analysis (1, 3, 6, 12, 24 hours) to map the temporal sequence of host transcriptional changes during lytic induction and inhibitor rescue.
+- CRISPR knockout screens targeting the core signature genes  particularly EGR1, NFKB1, FGD4, and ARHGAP11B  to causally validate their roles in the latency-lytic decision.
+
+\newpage
+
+# Conclusion
+
+This reanalysis demonstrated the power of statistical interaction modelling in DESeq2 for dissecting the host transcriptional mechanisms of EBV lytic reactivation control with a precision that simple pairwise comparisons may not achieve. By implementing the NaB × Inhibitor interaction model and applying a stringent concordant overlap filter, we identified 127 host genes that are consistently and directionally reversed by both valproate and valpromide during NaB-induced lytic reactivation, providing a high-confidence core reactivation-control signature.
+
+The VPA contrast identified 1,309 significant genes, reflecting VPA's broader pharmacological target spectrum, while the VPM contrast yielded 90, consistent with its more targeted HDAC inhibitory mechanism. Hierarchical clustering of the core signature revealed two coordinately regulated gene modules with opposing expression trajectories, identifying both a latency-maintenance programme (suppressed by NaB, restored by inhibitors including NFKB1, EBF1, TRIM8) and a lytic-facilitating programme (activated by NaB, reversed by inhibitors, including EGR1, FOS, FGD4, SREBF1).
+
+Reactome pathway enrichment identified the RHO GTPase cycle as the sole statistically significant pathway (padj = 0.016, 12 genes, 4.1-fold enrichment), implicating cytoskeletal dynamics and vesicular trafficking which are processes required for viral capsid nuclear egress, cytoplasmic envelopment, and virion exocytosis as critical host requirements for the lytic cycle that HDAC inhibitors dismantle. GO enrichment identified borderline enrichment of miRNA metabolic process regulation (padj = 0.076, 13.2-fold enrichment), suggesting post-transcriptional silencing as an additional layer of the latency-control programme mediated by NFKB1, EGR1, NEAT1, FOS, and SREBF1.
+
+Together, these findings propose a three-mechanism model in which HDAC inhibitors maintain EBV latency by: (1) restoring B-cell identity and innate antiviral restriction through NFKB1, EBF1, and TRIM8; (2) suppressing RHO GTPase-mediated cytoskeletal remodelling required for virion production and egress; and (3) blocking lipid metabolic reprogramming and reinforcing post-transcriptional latency through miRNA pathway restoration. These findings provide a transcriptome-level mechanistic framework and nominate specific host pathway targets particularly RHO GTPase signalling and EGR1-mediated lytic initiation for experimental validation as potential therapeutic strategies in EBV-associated Burkitt lymphoma and other gamma-herpesvirus-driven malignancies.
+
+\newpage
+
+# References
+
+Black, P. N., & DiRusso, C. C. (2003). Transmembrane movement of exogenous long-chain fatty acids: proteins, enzymes, and vectorial esterification. Microbiology and molecular biology reviews : MMBR, 67(3), 454–472. https://doi.org/10.1128/MMBR.67.3.454-472.2003
+
+Brady, G., MacArthur, G. J., & Farrell, P. J. (2007). Epstein-Barr virus and Burkitt lymphoma. Journal of clinical pathology, 60(12), 1397–1402. https://doi.org/10.1136/jcp.2007.047977
+
+Chang, Z., Wang, Y., Zhou, X., & Long, J. E. (2018). STAT3 roles in viral infection: antiviral or proviral?. Future virology, 13(8), 557–574. https://doi.org/10.2217/fvl-2018-0033
+
+Damania, B., Kenney, S. C., & Raab-Traub, N. (2022). Epstein-Barr virus: Biology and clinical disease. Cell, 185(20), 3652–3670. https://doi.org/10.1016/j.cell.2022.08.026
+
+Geng, F., & Guo, D. (2024). SREBF1/SREBP-1 concurrently regulates lipid synthesis and lipophagy to maintain lipid homeostasis and tumor growth. Autophagy, 20(5), 1183–1185. https://doi.org/10.1080/15548627.2023.2275501
+
+Gorres, K. L., Reineke, D. M., & Miller, G. (2024). Transcriptome analysis of Burkitt lymphoma cells treated with anti-convulsant drugs that are inhibitors of Epstein-Barr virus lytic reactivation. PLoS ONE, 19(4), e0299198. https://doi.org/10.1371/journal.pone.0299198
+
+Gortat, A., Sancho, M., Mondragón, L., Messeguer, À., Pérez-Payá, E., & Orzáez, M. (2015). Apaf1 inhibition promotes cell recovery from apoptosis. Protein & cell, 6(11), 833–843. https://doi.org/10.1007/s13238-015-0200-2
+
+Huber, W., Carey, V. J., Gentleman, R., Anders, S., Carlson, M., Carvalho, B. S., Bravo, H. C., Davis, S., Gatto, L., Girke, T., Gottardo, R., Hahne, F., Hansen, K. D., Irizarry, R. A., Lawrence, M., Love, M. I., MacDonald, J., Obenchain, V., Oleś, A. K., … Morgan, M. (2015). Orchestrating high-throughput genomic analysis with Bioconductor. Nature Methods, 12(2), 115–121. https://doi.org/10.1038/nmeth.3252
+
+Iriana, S., Asha, K., Repak, M., & Sharma-Walia, N. (2021). Hedgehog Signaling: Implications in Cancers and Viral Infections. International journal of molecular sciences, 22(3), 1042. https://doi.org/10.3390/ijms22031042
+
+Jiang, X., Tan, J., Li, J., Kivimäe, S., Yang, X., Zhuang, L., Lee, P. L., Chan, M. T., Stanton, L. W., Liu, E. T., Cheyette, B. N., & Yu, Q. (2008). DACT3 is an epigenetic regulator of Wnt/beta-catenin signaling in colorectal cancer and is a therapeutic target of histone modifications. Cancer cell, 13(6), 529–541. https://doi.org/10.1016/j.ccr.2008.04.019
+
+Kenney, S. C., & Mertz, J. E. (2014). Regulation of the latent-lytic switch in Epstein-Barr virus. Seminars in Cancer Biology, 26, 60–68. https://doi.org/10.1016/j.semcancer.2014.01.002
+
+Lieberman, P. M. (2013). Keeping it quiet: chromatin control of gammaherpesvirus latency. Nature Reviews Microbiology, 11(12), 863–875. https://doi.org/10.1038/nrmicro3135
+
+Love, M. I., Huber, W., & Anders, S. (2014). Moderated estimation of fold change and dispersion for RNA-seq data with DESeq2. Genome biology, 15(12), 550. https://doi.org/10.1186/s13059-014-0550-8
+
+Parmigiani, A., Nourbakhsh, A., Ding, B., Wang, W., Kim, Y. C., Akopiants, K., Guan, K. L., Karin, M., & Budanov, A. V. (2014). Sestrins inhibit mTORC1 kinase activation through the GATOR complex. Cell reports, 9(4), 1281–1291. https://doi.org/10.1016/j.celrep.2014.10.019
+
+Tang, J., Pan, M., Liu, J., Yu, G., Wang, S., & Li, F. (2025). Circadian clock proteins BMAL1 and CLOCK regulate HSV-1 entry into nerve cells through NECTIN-1. Virology journal, 22(1), 333. https://doi.org/10.1186/s12985-025-02936-y
+
+Wang, J., Zhao, Q., Zhang, S., Liu, J., Fan, X., Han, B., Hou, Y., & Ai, X. (2026). Microbial short chain fatty acids: Effective histone deacetylase inhibitors in immune regulation (Review). International journal of molecular medicine, 57(1), 16. https://doi.org/10.3892/ijmm.2025.5687
+
+Whitehead, I. P., Abe, K., Gorski, J. L., & Der, C. J. (1998). CDC42 and FGD1 cause distinct signaling and transforming activities. Molecular and cellular biology, 18(8), 4689–4697. https://doi.org/10.1128/MCB.18.8.4689 
+
+Wilbur, J. D., Chen, C. Y., Manalo, V., Hwang, P. K., Fletterick, R. J., & Brodsky, F. M. (2008). Actin binding by Hip1 (huntingtin-interacting protein 1) and Hip1R (Hip1-related protein) is regulated by clathrin light chain. The Journal of biological chemistry, 283(47), 32870–32879. https://doi.org/10.1074/jbc.M802863200
+
+Woellmer, A., & Hammerschmidt, W. (2013). Epstein-Barr virus and host cell methylation: regulation of latency, replication and virus reactivation. Current Opinion in Virology, 3(3), 260–265. https://doi.org/10.1016/j.coviro.2013.03.005
+
+Wong, Y., Meehan, M. T., Burrows, S. R., Doolan, D. L., & Miles, J. J. (2022). Estimating the global burden of Epstein-Barr virus-related cancers. Journal of cancer research and clinical oncology, 148(1), 31–46. https://doi.org/10.1007/s00432-021-03824-y
+
+Wu, T., Hu, E., Xu, S., Chen, M., Guo, P., Dai, Z., Feng, T., Zhou, L., Tang, W., Zhan, L., Fu, X., Liu, S., Bo, X., & Yu, G. (2021). clusterProfiler 4.0: A universal enrichment tool for interpreting omics data. The Innovation, 2(3), 100141. https://doi.org/10.1016/j.xinn.2021.100141
+
+Yu, G., & He, Q.-Y. (2016). ReactomePA: An R/Bioconductor package for reactome pathway analysis and visualisation. Molecular BioSystems, 12(2), 477–479. https://doi.org/10.1039/C5MB00663E
+
+\newpage
+
+# Appendix: Session Information
+
+```{r session_info}
+sessionInfo()
+```
